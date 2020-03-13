@@ -185,7 +185,7 @@ class Pointer(referencing.ReferencedInheritingObject,
     )
 
     # Computable pointers have this set to an expression
-    # definining them.
+    # defining them.
     expr = so.SchemaField(
         s_expr.Expression,
         default=None, coerce=True, compcoef=0.909)
@@ -196,7 +196,7 @@ class Pointer(referencing.ReferencedInheritingObject,
         default=None, coerce=True, compcoef=0.909)
 
     cardinality = so.SchemaField(
-        qltypes.Cardinality,
+        qltypes.SchemaCardinality,
         default=None, compcoef=0.833, coerce=True,
         merge_fn=merge_cardinality)
 
@@ -409,17 +409,25 @@ class Pointer(referencing.ReferencedInheritingObject,
 
         exclusive = schema.get('std::exclusive')
 
-        for constr in self.get_constraints(schema).objects(schema):
+        ptr = self.get_nearest_non_derived_parent(schema)
+
+        for constr in ptr.get_constraints(schema).objects(schema):
             if (constr.issubclass(schema, exclusive) and
                     not constr.get_subjectexpr(schema)):
+
                 return True
 
         return False
 
-    def singular(self, schema, direction=PointerDirection.Outbound):
+    def singular(
+        self,
+        schema: s_schema.Schema,
+        direction: PointerDirection = PointerDirection.Outbound,
+    ) -> bool:
         # Determine the cardinality of a given endpoint set.
         if direction == PointerDirection.Outbound:
-            return self.get_cardinality(schema) is qltypes.Cardinality.ONE
+            return (self.get_cardinality(schema) is
+                    qltypes.SchemaCardinality.ONE)
         else:
             return self.is_exclusive(schema)
 
@@ -525,7 +533,11 @@ class PseudoPointer(s_abc.Pointer):
     def generic(self, schema):
         return False
 
-    def singular(self, schema, direction=PointerDirection.Outbound) -> bool:
+    def singular(
+        self,
+        schema: s_schema.Schema,
+        direction: PointerDirection = PointerDirection.Outbound,
+    ) -> bool:
         raise NotImplementedError
 
     def scalar(self):
@@ -665,7 +677,9 @@ class PointerCommandOrFragment(sd.ObjectCommand[Pointer]):
                 )
 
         self.set_attribute_value('expr', expr)
-        self.set_attribute_value('cardinality', expr.irast.cardinality)
+        required, card = expr.irast.cardinality.to_schema_value()
+        self.set_attribute_value('cardinality', card)
+        self.set_attribute_value('required', required)
         self.set_attribute_value('computable', True)
 
         return schema, target, base
@@ -720,8 +734,8 @@ class PointerCommand(
 
             ptr_cardinality = scls.get_cardinality(schema)
             default_cardinality = default_expr.irast.cardinality
-            if (ptr_cardinality is qltypes.Cardinality.ONE
-                    and default_cardinality is qltypes.Cardinality.MANY):
+            if (ptr_cardinality is qltypes.SchemaCardinality.ONE
+                    and default_cardinality.is_multi()):
                 raise errors.SchemaDefinitionError(
                     f'possibly more than one element returned by '
                     f'the default expression for '
@@ -839,7 +853,7 @@ class PointerCommand(
 
             if self.get_attribute_value('cardinality') is None:
                 self.set_attribute_value(
-                    'cardinality', qltypes.Cardinality.ONE)
+                    'cardinality', qltypes.SchemaCardinality.ONE)
 
             if self.get_attribute_value('required') is None:
                 self.set_attribute_value(
@@ -1025,10 +1039,10 @@ def get_or_create_union_pointer(
     schema, target = utils.get_union_type(
         schema, targets, opaque=opaque, module=modname)
 
-    cardinality = qltypes.Cardinality.ONE
+    cardinality = qltypes.SchemaCardinality.ONE
     for component in components:
-        if component.get_cardinality(schema) is qltypes.Cardinality.MANY:
-            cardinality = qltypes.Cardinality.MANY
+        if component.get_cardinality(schema) is qltypes.SchemaCardinality.MANY:
+            cardinality = qltypes.SchemaCardinality.MANY
             break
 
     metacls = type(components[0])
@@ -1078,10 +1092,10 @@ def get_or_create_intersection_pointer(
     schema, target = utils.get_intersection_type(
         schema, targets, module=modname)
 
-    cardinality = qltypes.Cardinality.ONE
+    cardinality = qltypes.SchemaCardinality.ONE
     for component in components:
-        if component.get_cardinality(schema) is qltypes.Cardinality.MANY:
-            cardinality = qltypes.Cardinality.MANY
+        if component.get_cardinality(schema) is qltypes.SchemaCardinality.MANY:
+            cardinality = qltypes.SchemaCardinality.MANY
             break
 
     metacls = type(components[0])

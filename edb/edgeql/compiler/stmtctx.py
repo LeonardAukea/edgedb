@@ -31,6 +31,7 @@ from edb import errors
 from edb.common import parsing
 
 from edb.ir import ast as irast
+from edb.ir import typeutils
 
 from edb.schema import functions as s_func
 from edb.schema import modules as s_mod
@@ -45,6 +46,7 @@ from edb.schema import types as s_types
 from edb.edgeql import ast as qlast
 from edb.edgeql import qltypes
 from edb.edgeql import parser as qlparser
+from edb.edgeql.compiler.inference import cardinality as inf_card
 
 from . import astutils
 from . import context
@@ -146,7 +148,7 @@ def fini_expression(
         cardinality = inference.infer_cardinality(
             ir, scope_tree=ctx.path_scope, env=ctx.env)
     else:
-        cardinality = qltypes.Cardinality.ONE
+        cardinality = qltypes.Cardinality.AT_MOST_ONE
 
     if ctx.env.schema_view_mode:
         for view in ctx.view_nodes.values():
@@ -473,16 +475,19 @@ def _infer_pointer_cardinality(
         source_ctx: Optional[parsing.ParserContext] = None,
         ctx: context.ContextLevel) -> None:
 
+    # Infer cardinality and convert it back to schema values of "ONE/MANY".
     inferred_card = infer_expr_cardinality(irexpr=irexpr, ctx=ctx)
-    if specified_card is None or inferred_card is specified_card:
+
+    if specified_card is None:
         ptr_card = inferred_card
     else:
-        if specified_card is qltypes.Cardinality.MANY:
-            # Explicit many foo := <expr>, just take it.
+        if inf_card.is_subset_cardinality(inferred_card, specified_card):
+            # The inferred cardinality is within the boundaries of
+            # specified cardinality.
             ptr_card = specified_card
         else:
-            # Specified cardinality is ONE, but we inferred MANY, this
-            # is an error.
+            # Specified cardinality is stricter than inferred (e.g.
+            # ONE vs MANY), this is an error.
             raise errors.QueryError(
                 f'possibly more than one element returned by an '
                 f'expression for a computable '
@@ -491,8 +496,11 @@ def _infer_pointer_cardinality(
                 context=source_ctx
             )
 
+    required, card = ptr_card.to_schema_value()
     ctx.env.schema = ptrcls.set_field_value(
-        ctx.env.schema, 'cardinality', ptr_card)
+        ctx.env.schema, 'cardinality', card)
+    ctx.env.schema = ptrcls.set_field_value(
+        ctx.env.schema, 'required', required)
     _update_cardinality_in_derived(ptrcls, ctx=ctx)
     _update_cardinality_callbacks(ptrcls, ctx=ctx)
 
@@ -524,7 +532,7 @@ def _update_cardinality_callbacks(
 def pend_pointer_cardinality_inference(
         *,
         ptrcls: s_pointers.Pointer,
-        specified_card: Optional[qltypes.Cardinality] = None,
+        specified_card: Optional[qltypes.SchemaCardinality] = None,
         source_ctx: Optional[parsing.ParserContext] = None,
         ctx: context.ContextLevel) -> None:
 
@@ -534,8 +542,16 @@ def pend_pointer_cardinality_inference(
     else:
         callbacks = []
 
+    # Convert the SchemaCardinality into Cardinality used for inference.
+    if specified_card is None:
+        sc = None
+    elif specified_card == qltypes.SchemaCardinality.MANY:
+        sc = qltypes.Cardinality.MANY
+    else:
+        sc = qltypes.Cardinality.AT_MOST_ONE
+
     ctx.pending_cardinality[ptrcls] = context.PendingCardinality(
-        specified_cardinality=specified_card,
+        specified_cardinality=sc,
         source_ctx=source_ctx,
         callbacks=callbacks,
     )
@@ -605,13 +621,13 @@ def ensure_ptrref_cardinality(
             *,
             ctx: context.ContextLevel,
         ) -> None:
-            if ptrcls.singular(ctx.env.schema, ptrref.direction):
-                ptrref.dir_cardinality = qltypes.Cardinality.ONE
-            else:
-                ptrref.dir_cardinality = qltypes.Cardinality.MANY
-            out_cardinality = ptrcls.get_cardinality(ctx.env.schema)
-            assert out_cardinality is not None
-            ptrref.out_cardinality = out_cardinality
+
+            out_card, dir_card = typeutils.cardinality_from_ptrcls(
+                ctx.env.schema, ptrcls, direction=ptrref.direction)
+            assert dir_card is not None
+            assert out_card is not None
+            ptrref.dir_cardinality = dir_card
+            ptrref.out_cardinality = out_card
 
         once_pointer_cardinality_is_inferred(
             ptrcls, _update_ref_cardinality, ctx=ctx)
@@ -633,7 +649,7 @@ def enforce_singleton_now(
         env=ctx.env,
     )
 
-    if cardinality != qltypes.Cardinality.ONE:
+    if cardinality.is_multi():
         raise errors.QueryError(
             'possibly more than one element returned by an expression '
             'where only singletons are allowed',
