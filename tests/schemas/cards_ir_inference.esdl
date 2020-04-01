@@ -81,3 +81,20 @@ alias EarthOrFireCard {
 alias SpecialCardAlias := SpecialCard {
     el_cost := (.element, .cost)
 };
+
+
+type Eert {
+    required property val -> str {
+        constraint exclusive;
+    }
+
+    link parent := .<children[IS Eert];
+    multi link children -> Eert {
+        constraint exclusive;
+    }
+}
+
+
+type Report extending Named {
+    required link user -> User;
+}

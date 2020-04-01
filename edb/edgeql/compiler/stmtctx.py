@@ -486,15 +486,26 @@ def _infer_pointer_cardinality(
             # specified cardinality.
             ptr_card = specified_card
         else:
+            sp_req, sp_card = specified_card.to_schema_value()
+            ic_req, ic_card = inferred_card.to_schema_value()
             # Specified cardinality is stricter than inferred (e.g.
             # ONE vs MANY), this is an error.
-            raise errors.QueryError(
-                f'possibly more than one element returned by an '
-                f'expression for a computable '
-                f'{ptrcls.get_verbosename(ctx.env.schema)} '
-                f"declared as 'single'",
-                context=source_ctx
-            )
+            if sp_req and not ic_req:
+                raise errors.QueryError(
+                    f'possibly an empty set returned by an '
+                    f'expression for a computable '
+                    f'{ptrcls.get_verbosename(ctx.env.schema)} '
+                    f"declared as 'required'",
+                    context=source_ctx
+                )
+            else:
+                raise errors.QueryError(
+                    f'possibly more than one element returned by an '
+                    f'expression for a computable '
+                    f'{ptrcls.get_verbosename(ctx.env.schema)} '
+                    f"declared as 'single'",
+                    context=source_ctx
+                )
 
     required, card = ptr_card.to_schema_value()
     ctx.env.schema = ptrcls.set_field_value(
@@ -532,6 +543,7 @@ def _update_cardinality_callbacks(
 def pend_pointer_cardinality_inference(
         *,
         ptrcls: s_pointers.Pointer,
+        specified_required: bool = False,
         specified_card: Optional[qltypes.SchemaCardinality] = None,
         source_ctx: Optional[parsing.ParserContext] = None,
         ctx: context.ContextLevel) -> None:
@@ -545,10 +557,9 @@ def pend_pointer_cardinality_inference(
     # Convert the SchemaCardinality into Cardinality used for inference.
     if specified_card is None:
         sc = None
-    elif specified_card == qltypes.SchemaCardinality.MANY:
-        sc = qltypes.Cardinality.MANY
     else:
-        sc = qltypes.Cardinality.AT_MOST_ONE
+        sc = qltypes.Cardinality.from_schema_value(
+            specified_required, specified_card)
 
     ctx.pending_cardinality[ptrcls] = context.PendingCardinality(
         specified_cardinality=sc,

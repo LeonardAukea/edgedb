@@ -678,8 +678,49 @@ class PointerCommandOrFragment(sd.ObjectCommand[Pointer]):
 
         self.set_attribute_value('expr', expr)
         required, card = expr.irast.cardinality.to_schema_value()
-        self.set_attribute_value('cardinality', card)
-        self.set_attribute_value('required', required)
+        spec_required = self.get_attribute_value('required')
+        spec_card = self.get_attribute_value('cardinality')
+
+        # If cardinality was unspecified and the computable is not
+        # required, use the inferred cardinality.
+        if spec_card is None and not spec_required:
+            self.set_attribute_value('required', required)
+            self.set_attribute_value('cardinality', card)
+        else:
+            # Otherwise honor the spec, so no cardinality change, but check
+            # that it's valid.
+
+            if spec_card is None:
+                # A computable link is marked explicitly as
+                # "required", so we assume that omitted cardinality is
+                # "single". Basically, to infer the cardinality both
+                # cardinality-related qualifiers need to be omitted.
+                spec_card = qltypes.SchemaCardinality.ONE
+
+            if spec_required and not required:
+                ptr_name = sn.shortname_from_fullname(
+                    self.get_attribute_value('name')).name
+                srcctx = self.get_attribute_source_context('target')
+                raise errors.QueryError(
+                    f'possibly an empty set returned by an '
+                    f'expression for a computable '
+                    f'{ptr_name!r} '
+                    f"declared as 'required'",
+                    context=srcctx
+                )
+            if (spec_card is qltypes.SchemaCardinality.ONE
+                    and card != spec_card):
+                ptr_name = sn.shortname_from_fullname(
+                    self.get_attribute_value('name')).name
+                srcctx = self.get_attribute_source_context('target')
+                raise errors.QueryError(
+                    f'possibly more than one element returned by an '
+                    f'expression for a computable '
+                    f'{ptr_name!r} '
+                    f"declared as 'single'",
+                    context=srcctx
+                )
+
         self.set_attribute_value('computable', True)
 
         return schema, target, base
@@ -731,16 +772,20 @@ class PointerCommand(
                     f'expected {ptr_target.get_displayname(schema)}',
                     context=source_context,
                 )
-
+            # "required" status of defaults should not be enforced
+            # because it's impossible to actually guarantee that any
+            # SELECT involving a path is non-empty
             ptr_cardinality = scls.get_cardinality(schema)
-            default_cardinality = default_expr.irast.cardinality
+            default_required, default_cardinality = \
+                default_expr.irast.cardinality.to_schema_value()
+
             if (ptr_cardinality is qltypes.SchemaCardinality.ONE
-                    and default_cardinality.is_multi()):
+                    and default_cardinality != ptr_cardinality):
                 raise errors.SchemaDefinitionError(
                     f'possibly more than one element returned by '
                     f'the default expression for '
                     f'{scls.get_verbosename(schema)} declared as '
-                    f'\'single\'',
+                    f"'single'",
                     context=source_context,
                 )
 
@@ -851,13 +896,17 @@ class PointerCommand(
                 source_context=astnode.target.context,
             )
 
-            if self.get_attribute_value('cardinality') is None:
-                self.set_attribute_value(
-                    'cardinality', qltypes.SchemaCardinality.ONE)
+            # If target is a computable ref defer cardinality
+            # enforcement until the expression is parsed.
+            if not isinstance(target_ref, ComputableRef):
+                if self.get_attribute_value('cardinality') is None:
+                    self.set_attribute_value(
+                        'cardinality', qltypes.SchemaCardinality.ONE)
 
-            if self.get_attribute_value('required') is None:
-                self.set_attribute_value(
-                    'required', False)
+                if self.get_attribute_value('required') is None:
+                    self.set_attribute_value(
+                        'required', False)
+
         elif target_ref is not None:
             self._set_pointer_type(schema, astnode, context, target_ref)
 

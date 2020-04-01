@@ -4411,7 +4411,7 @@ class TestDescribe(tb.BaseSchemaLoadTest):
                 LIMIT
                     1
                 );
-                CREATE SINGLE PROPERTY compprop := ('foo');
+                CREATE REQUIRED SINGLE PROPERTY compprop := ('foo');
             };
             """
         )
@@ -4458,7 +4458,7 @@ class TestDescribe(tb.BaseSchemaLoadTest):
                 LIMIT
                     1
                 );
-                CREATE SINGLE PROPERTY compprop := ('foo');
+                CREATE REQUIRED SINGLE PROPERTY compprop := ('foo');
             };
             """
         )

@@ -364,6 +364,7 @@ def _normalize_view_ptr_expr(
             ctx.pointer_derivation_map[base_ptrcls].append(ptrcls)
             stmtctx.pend_pointer_cardinality_inference(
                 ptrcls=ptrcls,
+                specified_required=shape_el.required,
                 specified_card=shape_el.cardinality,
                 source_ctx=shape_el.context,
                 ctx=ctx)
@@ -695,8 +696,11 @@ def _normalize_view_ptr_expr(
 
             if base_cardinality is None:
                 specified_cardinality = shape_el.cardinality
+                specified_required = shape_el.required
             else:
                 specified_cardinality = base_cardinality
+                base_required = base_ptrcls.get_required(ctx.env.schema)
+
                 if (shape_el.cardinality is not None
                         and base_ptrcls is not None
                         and shape_el.cardinality != base_cardinality):
@@ -710,9 +714,12 @@ def _normalize_view_ptr_expr(
                         f'in the base {base_src_name}',
                         context=compexpr.context,
                     )
+                # The required flag may be inherited from the base
+                specified_required = shape_el.required or base_required
 
             stmtctx.pend_pointer_cardinality_inference(
                 ptrcls=ptrcls,
+                specified_required=specified_required,
                 specified_card=specified_cardinality,
                 source_ctx=shape_el.context,
                 ctx=ctx,

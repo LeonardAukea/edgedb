@@ -20,6 +20,7 @@
 import os.path
 import textwrap
 
+from edb import errors
 from edb.testbase import lang as tb
 
 from edb.edgeql import compiler
@@ -373,4 +374,54 @@ class TestEdgeQLCardinalityInference(tb.BaseEdgeQLCompilerTest):
         }
 % OK %
         recipient: AT_MOST_ONE
+        """
+
+    def test_edgeql_ir_card_inference_36(self):
+        """
+        WITH MODULE test
+        SELECT Eert {
+            parent
+        }
+% OK %
+        parent: AT_MOST_ONE
+        """
+
+    def test_edgeql_ir_card_inference_37(self):
+        """
+        WITH MODULE test
+        SELECT Report {
+            user_name := .user.name
+        }
+% OK %
+        user_name: ONE
+        """
+
+    def test_edgeql_ir_card_inference_38(self):
+        """
+        WITH MODULE test
+        SELECT Report {
+            name := .user.name
+        }
+% OK %
+        name: ONE
+        """
+
+    @tb.must_fail(errors.QueryError,
+                  "possibly an empty set", line=4, col=13)
+    def test_edgeql_ir_card_inference_39(self):
+        """
+        WITH MODULE test
+        SELECT Report {
+            name := <str>{}
+        }
+        """
+
+    @tb.must_fail(errors.QueryError,
+                  "possibly more than one element", line=4, col=13)
+    def test_edgeql_ir_card_inference_40(self):
+        """
+        WITH MODULE test
+        SELECT Report {
+            single foo := User.name
+        }
         """
