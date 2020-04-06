@@ -479,6 +479,7 @@ def ptrref_from_ptrcls(
         union_ptrs = set()
 
         for component in union_of.objects(schema):
+            assert isinstance(component, s_types.Type)
             material_comp = component.material_type(schema)
             union_ptrs.add(material_comp)
 

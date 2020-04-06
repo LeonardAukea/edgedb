@@ -1019,7 +1019,7 @@ class Schema(SDL):
 #
 
 
-def get_targets(target: TypeExpr):
+def get_targets(target: typing.Union[None, TypeExpr, Expr]):
     if target is None:
         return []
     elif isinstance(target, TypeOp):
